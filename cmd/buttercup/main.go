@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"syscall"
@@ -17,13 +18,36 @@ import (
 )
 
 func main() {
+	
+	configPath := os.ExpandEnv("$HOME/.config/buttercup/config")
+
+	// Load config from default location
+	// internal.Debug("Loading config from default location")
+	config, err := internal.LoadConfig(configPath)
+	if err != nil {
+		internal.Exit("Failed to load config", err)
+	}
+
+	flag.BoolVar(&config.SaveMpvSpeed, "save-mpv-speed", config.SaveMpvSpeed, "Save MPV speed setting (true/false)")
 	debug := flag.Bool("debug", false, "Enable debug logging")
+	rofiSelection := flag.Bool("rofi", false, "Open selection in rofi")
+	noRofi := flag.Bool("no-rofi", false, "No rofi")
+	updateScript := flag.Bool("u", false, "Update the script")
 	editConfig := flag.Bool("e", false, "Edit configuration file")	
 	flag.Parse()
 
 	internal.InitLogger(*debug)
-	
-	configPath := os.ExpandEnv("$HOME/.config/buttercup/config")
+
+	if *updateScript {
+		repo := "wraient/buttercup"
+		fileName := "buttercup"
+
+		if err := internal.UpdateButtercup(repo, fileName); err != nil {
+			internal.Exit("Error updating executable", err)
+		} else {
+			internal.Exit("Program Updated!", nil)
+		}
+	}
 
 	// Handle config editing flag
 	if *editConfig {
@@ -38,12 +62,29 @@ func main() {
 		return
 	}
 
-	// Load config from default location
-	internal.Debug("Loading config from default location")
-	config, err := internal.LoadConfig(configPath)
-	if err != nil {
-		internal.Exit("Failed to load config", err)
+	if *rofiSelection {
+		config.RofiSelection = true
 	}
+
+	if *noRofi || runtime.GOOS != "linux" {
+		config.RofiSelection = false
+	}
+
+	if config.RofiSelection {
+		// Define a slice of file names to check and download
+		filesToCheck := []string{
+			"selectPreview.rasi",
+			"select.rasi",
+			"userInput.rasi",
+		}
+
+		// Call the function to check and download files
+		err := internal.CheckAndDownloadFiles(os.ExpandEnv(config.StoragePath), filesToCheck)
+		if err != nil {
+			internal.Exit("Error checking and downloading files", err)
+		}
+	}
+
 
 	// Check if Jackett is available
 	if err := internal.CheckJackettAvailability(&config); err != nil {
@@ -100,14 +141,32 @@ func main() {
 
 
 			case "2":
-				fmt.Print("Enter Jackett URL (e.g., 127.0.0.1): ")
-				fmt.Scanln(&config.JackettUrl)
+				if config.RofiSelection {
+					config.JackettUrl, err = internal.GetUserInputFromRofi("Enter Jackett URL (e.g., 127.0.0.1)")
+					if err != nil {
+						internal.Exit("Failed to get Jackett URL", err)
+					}
+
+					config.JackettPort, err = internal.GetUserInputFromRofi("Enter Jackett Port (e.g., 9117)")
+					if err != nil {
+						internal.Exit("Failed to get Jackett Port", err)
+					}
+
+					config.JackettApiKey, err = internal.GetUserInputFromRofi("Enter Jackett API Key")
+					if err != nil {
+						internal.Exit("Failed to get Jackett API Key", err)
+					}
+				} else {
+					fmt.Print("Enter Jackett URL (e.g., 127.0.0.1): ")
+					fmt.Scanln(&config.JackettUrl)
+
+					fmt.Print("Enter Jackett Port (e.g., 9117): ")
+					fmt.Scanln(&config.JackettPort)
+					
+					fmt.Print("Enter Jackett API Key: ")
+					fmt.Scanln(&config.JackettApiKey)
+				}
 				
-				fmt.Print("Enter Jackett Port (e.g., 9117): ")
-				fmt.Scanln(&config.JackettPort)
-				
-				fmt.Print("Enter Jackett API Key: ")
-				fmt.Scanln(&config.JackettApiKey)
 
 				// Save the updated config
 				if err := internal.SaveConfig(configPath, config); err != nil {
@@ -166,13 +225,19 @@ func main() {
 
 	switch initialSelection.Key {
 	case "1":
-		// Handle new search
 		var searchQuery string
-		reader := bufio.NewReader(os.Stdin)
-		fmt.Print("Enter search query: ")
-		input, _ := reader.ReadString('\n')
-		searchQuery = strings.TrimSpace(input)
-	
+		// Handle new search
+		if config.RofiSelection {
+			searchQuery, err = internal.GetUserInputFromRofi("Enter search query")
+			if err != nil {
+				internal.Exit("Failed to get search query", err)
+			}
+		} else {
+			reader := bufio.NewReader(os.Stdin)
+			fmt.Print("Enter search query: ")
+			input, _ := reader.ReadString('\n')
+			searchQuery = strings.TrimSpace(input)
+		}
 		// Search Jackett with the provided query
 		jackettResponse, err := internal.SearchJackett(searchQuery)
 		if err != nil {
