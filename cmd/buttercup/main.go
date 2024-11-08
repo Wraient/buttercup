@@ -45,18 +45,101 @@ func main() {
 		internal.Exit("Failed to load config", err)
 	}
 
-	// Get Jackett API key and store it in config
-	apiKey, err := internal.GetJackettApiKey()
-	if err != nil {
-		internal.Exit("Failed to get Jackett API key", err)
+	// Check if Jackett is available
+	if err := internal.CheckJackettAvailability(&config); err != nil {
+		internal.Debug("Jackett not available")
+		if config.RunJackettAtStartup {
+			internal.Info("Starting Jackett service...")
+			err := internal.StartJackett()
+			if err != nil {
+				internal.Info("Failed to start Jackett", err)
+			}
+		}
+
+		if err := internal.CheckJackettAvailability(&config); err != nil {
+
+			// Create options map for Jackett setup menu
+			jackettOptions := map[string]string{
+				"1": "Install Jackett",
+				"2": "Configure Jackett URL and API key manually",
+			}
+
+			selected, err := internal.DynamicSelect(jackettOptions)
+			if err != nil {
+				internal.Exit("Error showing Jackett setup menu", err)
+			}
+
+			switch selected.Key {
+			case "1":
+				if err := internal.InstallJackett(); err != nil {
+					internal.Exit("Failed to install Jackett", err)
+				}
+				internal.Info("Starting Jackett service...")
+				err := internal.StartJackett()
+				if err != nil {
+					internal.Exit("Failed to start Jackett", err)
+				}
+				if err := internal.CheckJackettAvailability(&config); err != nil {
+					internal.Exit("Failed to check Jackett availability", err)
+				}
+
+				internal.Info("Getting Jackett API key...")
+				apiKey, err := internal.GetJackettApiKey()
+				if err != nil {
+					internal.Exit("Failed to get Jackett API key", err)
+				}
+				internal.Info("Jackett API key: %s", apiKey)
+				
+				config.JackettApiKey = apiKey
+				internal.SetGlobalConfig(&config)
+				
+				// Save updated config
+				if err := internal.SaveConfig(configPath, config); err != nil {
+					internal.Exit("Failed to save config", err)
+				}
+
+
+			case "2":
+				fmt.Print("Enter Jackett URL (e.g., 127.0.0.1): ")
+				fmt.Scanln(&config.JackettUrl)
+				
+				fmt.Print("Enter Jackett Port (e.g., 9117): ")
+				fmt.Scanln(&config.JackettPort)
+				
+				fmt.Print("Enter Jackett API Key: ")
+				fmt.Scanln(&config.JackettApiKey)
+
+				// Save the updated config
+				if err := internal.SaveConfig(configPath, config); err != nil {
+					internal.Exit("Failed to save config", err)
+				}
+
+			default:
+				internal.Exit("No selection made", nil)
+			}
+		}
 	}
-	
-	config.JackettApiKey = apiKey
-	internal.SetGlobalConfig(&config)
-	
-	// Save updated config
-	if err := internal.SaveConfig(configPath, config); err != nil {
-		internal.Exit("Failed to save config", err)
+
+	if config.RunJackettAtStartup {
+		// Get Jackett API key and store it in config
+		if config.JackettApiKey == "" {
+			internal.Info("Getting Jackett API key...")
+			apiKey, err := internal.GetJackettApiKey()
+			if err != nil {
+				internal.Exit("Failed to get Jackett API key", err)
+			}
+			internal.Info("Jackett API key: %s", apiKey)
+			
+			config.JackettApiKey = apiKey
+			internal.SetGlobalConfig(&config)
+			
+			// Save updated config
+			if err := internal.SaveConfig(configPath, config); err != nil {
+				internal.Exit("Failed to save config", err)
+			}
+		}
+		internal.SetGlobalConfig(&config)
+		internal.Info("Jackett API key: %s", config.JackettApiKey)
 	}
 
 	internal.Debug("Config loaded successfully: %+v", config)
@@ -206,7 +289,7 @@ func main() {
 	if err != nil {
 		internal.Exit("Failed to get torrent files", err)
 	}
-		
+	
 	// Start streaming directly with the selected/resumed file index
 	user.Player.SocketPath, err = internal.StreamTorrentPeerflix(user.Watching.URI, user.Watching.FileIndex)
 	if err != nil {

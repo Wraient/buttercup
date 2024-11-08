@@ -16,6 +16,7 @@ type ProgramConfig struct {
 	JackettUrl string `config:"JackettUrl"`
 	JackettPort string `config:"JackettPort"`
 	JackettApiKey string `config:"JackettApiKey"`
+	RunJackettAtStartup bool `config:"RunJackettAtStartup"`
 	RofiSelection bool `config:"RofiSelection"`
 	PercentageToMarkCompleted int `config:"PercentageToMarkCompleted"`
 	SaveMpvSpeed bool `config:"SaveMpvSpeed"`
@@ -28,6 +29,7 @@ func defaultConfigMap() map[string]string {
 		"JackettUrl": 				"127.0.0.1",
 		"JackettPort": 				"9117",
 		"JackettApiKey":			"",
+		"RunJackettAtStartup":		"true",
 		"RofiSelection":           "false",
 		"PercentageToMarkCompleted":	"92",
 		"SaveMpvSpeed":				"false",
