@@ -235,7 +235,7 @@ func main() {
 		options = make(map[string]string)
 		for i, file := range user.Watching.Files {
 			key := fmt.Sprintf("%d", i)
-			options[key] = file
+			options[key] = file.DisplayName
 		}
 
 		selected, err = internal.DynamicSelect(options)
@@ -247,7 +247,8 @@ func main() {
 			internal.Exit("No selection made, exiting", nil)
 		}
 
-		user.Watching.FileIndex, _ = strconv.Atoi(selected.Key)
+		selectedIndex, _ = strconv.Atoi(selected.Key)
+		user.Watching.FileIndex = user.Watching.Files[selectedIndex].ActualIndex
 
 	case "2":
 		if len(databaseTorrents) == 0 {
@@ -302,6 +303,14 @@ func main() {
 
 
     for {
+
+		// Get all files and find the current one by index
+		allFiles, err := internal.GetTorrentFiles(user.Watching.URI)
+		if err != nil {
+			internal.Debug(fmt.Sprintf("Error getting torrent files: %v", err))
+			continue
+		}
+
         // Get video duration
         go func() {
             for {
@@ -380,14 +389,19 @@ func main() {
                     if percentage >= float64(config.PercentageToMarkCompleted) {
                         // Sort episodes if not already sorted
                         if user.Watching.SortedFiles == nil {
-                            user.Watching.SortedFiles = internal.FindAndSortEpisodes(user.Watching.Files)
+                            // Convert TorrentFileInfo slice to string slice of display names
+                            fileNames := make([]string, len(user.Watching.Files))
+                            for i, file := range user.Watching.Files {
+                                fileNames[i] = file.DisplayName
+                            }
+                            user.Watching.SortedFiles = internal.FindAndSortEpisodes(fileNames)
                         }
 
                         // Find current episode in sorted list
                         currentFile := user.Watching.Files[user.Watching.FileIndex]
                         nextIndex := -1
                         for i, file := range user.Watching.SortedFiles {
-                            if file == currentFile && i < len(user.Watching.SortedFiles)-1 {
+                            if file == currentFile.DisplayName && i < len(user.Watching.SortedFiles)-1 {
                                 nextIndex = i + 1
                                 break
                             }
@@ -396,12 +410,12 @@ func main() {
                         if nextIndex != -1 {
                             // Find the index in original files slice
                             for i, file := range user.Watching.Files {
-                                if file == user.Watching.SortedFiles[nextIndex] {
-                                    internal.Output(fmt.Sprintf("Starting next episode: %s", file))
+                                if file.DisplayName == user.Watching.SortedFiles[nextIndex] {
+                                    internal.Output(fmt.Sprintf("Starting next episode: %s", file.DisplayName))
                                     user.Watching.FileIndex = i
                                     user.Player.PlaybackTime = 0
                                     // Update database with new episode and reset playback time
-                                    err = internal.LocalUpdateTorrent(databaseFile, user.Watching.URI, i, 0, file)
+                                    err = internal.LocalUpdateTorrent(databaseFile, user.Watching.URI, i, 0, file.DisplayName)
                                     if err != nil {
                                         internal.Debug(fmt.Sprintf("Error updating database for next episode: %v", err))
                                     }
@@ -421,7 +435,6 @@ func main() {
 
             // Episode started
             if timePos != nil && user.Player.Started {
-
                 showPosition, ok := timePos.(float64)
                 if !ok {
                     continue
@@ -433,8 +446,17 @@ func main() {
                 if err != nil {
                     internal.Debug(fmt.Sprintf("Error getting playback speed: %v", err))
                 }
-                // Save to database using the current file name as the title
-                currentFileName := user.Watching.Files[user.Watching.FileIndex]
+
+                // Find the file we're currently playing
+                var currentFileName string
+                for _, file := range allFiles {
+                    if file.ActualIndex == user.Watching.FileIndex {
+                        currentFileName = file.DisplayName
+                        break
+                    }
+                }
+
+                // Save to database using the current file name
                 err = internal.LocalUpdateTorrent(databaseFile, user.Watching.URI, user.Watching.FileIndex, user.Player.PlaybackTime, currentFileName)
                 if err != nil {
                     internal.Debug(fmt.Sprintf("Error updating database: %v", err))

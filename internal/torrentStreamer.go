@@ -112,7 +112,7 @@ func getMPVPosition(socketPath string) (float64, error) {
 	return response.Data, nil
 }
 
-func GetTorrentFiles(magnetURI string) ([]string, error) {
+func GetTorrentFiles(magnetURI string) ([]TorrentFileInfo, error) {
 	// Create temporary directory for downloads
 	tmpDir, err := os.MkdirTemp("", "torrent-stream-*")
 	if err != nil {
@@ -141,13 +141,16 @@ func GetTorrentFiles(magnetURI string) ([]string, error) {
 	// Wait for torrent info
 	<-t.GotInfo()
 
-	// Create list of files with sizes (video files only)
-	files := make([]string, 0)
-	for _, file := range t.Files() {
+	// Create list of video files with their actual indices
+	files := make([]TorrentFileInfo, 0)
+	for i, file := range t.Files() {
 		if IsVideoFile(file.Path()) {
-			files = append(files, fmt.Sprintf("%s (%s)", 
-				file.Path(), 
-				humanize.Bytes(uint64(file.Length()))))
+			files = append(files, TorrentFileInfo{
+				DisplayName: fmt.Sprintf("%s (%s)", 
+					file.Path(), 
+					humanize.Bytes(uint64(file.Length()))),
+				ActualIndex: i,
+			})
 		}
 	}
 
@@ -477,6 +480,6 @@ func CleanupPeerflix() {
 	fmt.Println("Killing peerflix process")
 
 	// Use pkill as a backup to ensure peerflix is killed
-	pkillCmd := exec.Command("pkill", "-9", "peerflix")
+	pkillCmd := exec.Command("pkill", "peerflix")
 	pkillCmd.Run() // Ignore errors as peerflix might not be running
 }

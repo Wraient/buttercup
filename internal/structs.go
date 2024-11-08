@@ -35,13 +35,18 @@ type Indexer struct {
     ElapsedTime int    `json:"ElapsedTime"`
 }
 
+type TorrentFileInfo struct {
+    DisplayName string
+    ActualIndex int
+}
+
 type Torrent struct {
     Title    string
     URI      string
     Size     int64
     Seeders  int
     Leechers int
-    Files    []string
+    Files    []TorrentFileInfo
     FileIndex int
     SortedFiles []string
 }
