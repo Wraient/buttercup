@@ -148,6 +148,8 @@ func main() {
 	databaseFile := filepath.Join(os.ExpandEnv(config.StoragePath), "torrent_history.txt")
 	databaseTorrents := internal.LocalGetAllTorrents(databaseFile)
 
+    defer internal.CleanupPeerflix() // Keep this as a backup
+
 	// Add initial menu options
 	initialOptions := map[string]string{
 		"1": "Start New Show",
@@ -463,5 +465,4 @@ func main() {
         os.Exit(0)
     }()
 
-    defer internal.CleanupPeerflix() // Keep this as a backup
 }
