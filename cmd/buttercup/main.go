@@ -238,17 +238,23 @@ func main() {
 			options[key] = file.DisplayName
 		}
 
-		selected, err = internal.DynamicSelect(options)
-		if err != nil {
-			internal.Exit("Error showing selection menu", err)
-		}
+		// Automatically select if only one file
+		if len(options) == 1 {
+			internal.Info("Only one file found, selecting automatically")
+			user.Watching.FileIndex = user.Watching.Files[0].ActualIndex
+		} else {
+			selected, err = internal.DynamicSelect(options)
+			if err != nil {
+				internal.Exit("Error showing selection menu", err)
+			}
 
-		if selected.Key == "-1" {
-			internal.Exit("No selection made, exiting", nil)
-		}
+			if selected.Key == "-1" {
+				internal.Exit("No selection made, exiting", nil)
+			}
 
-		selectedIndex, _ = strconv.Atoi(selected.Key)
-		user.Watching.FileIndex = user.Watching.Files[selectedIndex].ActualIndex
+			selectedIndex, _ = strconv.Atoi(selected.Key)
+			user.Watching.FileIndex = user.Watching.Files[selectedIndex].ActualIndex
+		}
 
 	case "2":
 		if len(databaseTorrents) == 0 {
