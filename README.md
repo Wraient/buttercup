@@ -7,6 +7,16 @@ A cli application to stream torrents and track the playback using [jackett](http
 
 https://discord.gg/cNaNVEE3B6
 
+## Demo
+Cli Mode:
+
+https://github.com/user-attachments/assets/59a17262-46b8-4cdd-bd79-3c362d72f2c6
+
+Rofi Mode:
+
+https://github.com/user-attachments/assets/c2c18047-b76a-4c98-a00d-fdab9e8fde5c
+
+
 ## Features
 - Search for torrents
 - Stream torrents
