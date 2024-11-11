@@ -8,6 +8,9 @@ A cli application to stream torrents and track the playback using [jackett](http
 https://discord.gg/cNaNVEE3B6
 
 ## Demo
+
+The demo speed has been increased, real speed would be slower depending on number of seeders and leechers
+
 Cli Mode:
 
 https://github.com/user-attachments/assets/59a17262-46b8-4cdd-bd79-3c362d72f2c6
@@ -112,8 +115,6 @@ sudo mv buttercup /usr/local/bin/
 buttercup
 ```
 </details>
-
----
 
 <details>
 <summary>Uninstallation</summary>
