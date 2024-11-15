@@ -1,7 +1,7 @@
 
 # buttercup
 
-A cli application to stream torrents and track the playback using [jackett](https://github.com/Jackett/Jackett) and [peerflix](https://github.com/mafintosh/peerflix)
+A cli application to stream torrents and track the playback using [jackett](https://github.com/Jackett/Jackett) and [webtorrent-cli](https://github.com/webtorrent/webtorrent-cli)
 
 ## Join the discord server
 
