@@ -12,7 +12,7 @@ https://discord.gg/cNaNVEE3B6
 
 
 ## Installing and Setup
-> **Note**: `buttercup` requires `mpv`, `rofi`, and `peerflix` for Rofi support and torrent streaming. These are included in the installation instructions below for each distribution.
+> **Note**: `buttercup` requires `mpv`, `rofi`, and `webtorrent-cli` for Rofi support and torrent streaming. These are included in the installation instructions below for each distribution.
 
 ### Linux
 <details>
@@ -37,7 +37,7 @@ git clone https://aur.archlinux.org/buttercup.git
 cd buttercup
 makepkg -si
 sudo pacman -S rofi npm
-npm install -g peerflix
+npm install -g webtorrent-cli
 ```
 </details>
 
@@ -47,7 +47,7 @@ npm install -g peerflix
 ```bash
 sudo apt update
 sudo apt install -y mpv curl rofi npm
-sudo npm install -g peerflix
+sudo npm install -g webtorrent-cli
 curl -Lo buttercup https://github.com/Wraient/buttercup/releases/latest/download/buttercup
 chmod +x buttercup
 sudo mv buttercup /usr/local/bin/
@@ -61,7 +61,7 @@ buttercup
 ```bash
 sudo dnf update
 sudo dnf install -y mpv curl rofi npm
-sudo npm install -g peerflix
+sudo npm install -g webtorrent-cli
 curl -Lo buttercup https://github.com/Wraient/buttercup/releases/latest/download/buttercup
 chmod +x buttercup
 sudo mv buttercup /usr/local/bin/
@@ -75,7 +75,7 @@ buttercup
 ```bash
 sudo zypper refresh
 sudo zypper install -y mpv curl rofi npm
-sudo npm install -g peerflix
+sudo npm install -g webtorrent-cli
 curl -Lo buttercup https://github.com/Wraient/buttercup/releases/latest/download/buttercup
 chmod +x buttercup
 sudo mv buttercup /usr/local/bin/
@@ -87,7 +87,7 @@ buttercup
 <summary>Generic Installation</summary>
 
 ```bash
-# Install mpv, curl, rofi, npm, and peerflix (required for image preview)
+# Install mpv, curl, rofi, npm, and webtorrent-cli (required for torrent streaming)
 # Install npm for any additional packages
 
 curl -Lo buttercup https://github.com/Wraient/buttercup/releases/latest/download/buttercup
