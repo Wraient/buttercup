@@ -1,26 +1,27 @@
 package internal
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
+	"sort"
 	"strconv"
+	"strings"
 	"syscall"
+	"time"
+	"net/url"
+
 	"github.com/anacrolix/torrent"
 	"github.com/anacrolix/torrent/storage"
 	"github.com/dustin/go-humanize"
-	"time"
-	"net"
-	"encoding/json"
-	"net/http"
-	"regexp"
-	"strings"
-	"sort"
 )
 
-var currentPeerflixProcess *os.Process
+var currentWebtorrentProcess *os.Process
 
 type TorrentFile struct {
 	Path     string
@@ -52,23 +53,23 @@ func NewStreamManager(reader *torrent.Reader, t *torrent.Torrent) *StreamManager
 
 func (sm *StreamManager) prioritizeFromPosition(pos int64) {
 	startPiece := pos / sm.pieceLength
-	
+
 	// Reset all piece priorities
 	for i := 0; i < sm.turntor.NumPieces(); i++ {
 		sm.turntor.Piece(i).SetPriority(torrent.PiecePriorityNone)
 	}
-	
+
 	// Only prioritize next 5 seconds worth of pieces
-	endPiece := startPiece + 5  // Approximate 5 pieces for 5 seconds
+	endPiece := startPiece + 5 // Approximate 5 pieces for 5 seconds
 	fmt.Printf("\nPrioritizing pieces %d to %d\n", startPiece, endPiece)
-	
+
 	for i := startPiece; i < endPiece && i < int64(sm.turntor.NumPieces()); i++ {
 		piece := sm.turntor.Piece(int(i))
 		piece.SetPriority(torrent.PiecePriorityNow)
-		
+
 		// Print piece status
-		fmt.Printf("Piece %d: Complete=%v, Priority=Now\n", 
-			i, 
+		fmt.Printf("Piece %d: Complete=%v, Priority=Now\n",
+			i,
 			piece.State().Complete)
 	}
 }
@@ -83,8 +84,8 @@ func getMPVPosition(socketPath string) (float64, error) {
 
 	// Send get_property command
 	cmd := struct {
-		Command   []string    `json:"command"`
-		RequestID int         `json:"request_id"`
+		Command   []string `json:"command"`
+		RequestID int      `json:"request_id"`
 	}{
 		Command:   []string{"get_property", "time-pos"},
 		RequestID: 1,
@@ -112,6 +113,54 @@ func getMPVPosition(socketPath string) (float64, error) {
 	return response.Data, nil
 }
 
+
+func StartWebtorrentServer(magnetURI string, selectedIndex int) error {
+	// First cleanup any existing webtorrent processes
+	CleanupWebtorrent()
+
+	// Get storage path from config
+	config := GetGlobalConfig()
+
+	// Create storage directory if it doesn't exist
+	if err := os.MkdirAll(config.StoragePath, 0755); err != nil {
+		return fmt.Errorf("failed to create storage directory: %w", err)
+	}
+
+	// Create the webtorrent command
+	webtorrentCmd := exec.Command("webtorrent",
+		magnetURI,
+		"--select", fmt.Sprintf("%d", selectedIndex),
+		"--keep-seeding",
+		"--no-quit",
+		"--quiet",
+		"--port", "8000",
+		"--out", config.StoragePath,
+	)
+
+	// Setup pipes for stdout/stderr
+	webtorrentCmd.Stdout = os.Stdout
+	webtorrentCmd.Stderr = os.Stderr
+
+	// Start the process
+	if err := webtorrentCmd.Start(); err != nil {
+		return fmt.Errorf("failed to start webtorrent: %w", err)
+	}
+
+	// Store the process for cleanup
+	currentWebtorrentProcess = webtorrentCmd.Process
+
+	// Don't wait for it to complete
+	go func() {
+		webtorrentCmd.Wait()
+	}()
+
+	Debug("Started webtorrent process (PID: %d) with storage path: %s", 
+		currentWebtorrentProcess.Pid, 
+		config.StoragePath)
+	return nil
+}
+
+
 func GetTorrentFiles(magnetURI string) ([]TorrentFileInfo, error) {
 	// Create temporary directory for downloads
 	tmpDir, err := os.MkdirTemp("", "torrent-stream-*")
@@ -124,7 +173,7 @@ func GetTorrentFiles(magnetURI string) ([]TorrentFileInfo, error) {
 	cfg := torrent.NewDefaultClientConfig()
 	cfg.DataDir = tmpDir
 	cfg.DefaultStorage = storage.NewFile(tmpDir)
-	
+
 	// Create torrent client
 	client, err := torrent.NewClient(cfg)
 	if err != nil {
@@ -146,8 +195,8 @@ func GetTorrentFiles(magnetURI string) ([]TorrentFileInfo, error) {
 	for i, file := range t.Files() {
 		if IsVideoFile(file.Path()) {
 			files = append(files, TorrentFileInfo{
-				DisplayName: fmt.Sprintf("%s (%s)", 
-					file.Path(), 
+				DisplayName: fmt.Sprintf("%s (%s)",
+					file.Path(),
 					humanize.Bytes(uint64(file.Length()))),
 				ActualIndex: i,
 			})
@@ -161,55 +210,83 @@ func GetTorrentFiles(magnetURI string) ([]TorrentFileInfo, error) {
 	return files, nil
 }
 
-func StreamTorrentPeerflix(magnetURI string, selectedIndex int) (string, error) {
-
-	// Check if peerflix is installed
-	peerflixPath, err := exec.LookPath("peerflix")
+func GetWebtorrentStreamURL(magnetURI string, selectedIndex int) (string, error) {
+	// Create temporary directory for downloads
+	tmpDir, err := os.MkdirTemp("", "torrent-stream-*")
 	if err != nil {
-		return "", fmt.Errorf("peerflix not found. Please install it with: npm install -g peerflix")
+		return "", fmt.Errorf("failed to create temp dir: %w", err)
 	}
+	defer os.RemoveAll(tmpDir)
+
+	// Configure torrent client
+	cfg := torrent.NewDefaultClientConfig()
+	cfg.DataDir = tmpDir
+	cfg.DefaultStorage = storage.NewFile(tmpDir)
+
+	// Create torrent client
+	client, err := torrent.NewClient(cfg)
+	if err != nil {
+		return "", fmt.Errorf("failed to create torrent client: %w", err)
+	}
+	defer client.Close()
+
+	// Add the magnet link
+	t, err := client.AddMagnet(magnetURI)
+	if err != nil {
+		return "", fmt.Errorf("failed to add magnet: %w", err)
+	}
+
+	// Wait for torrent info
+	<-t.GotInfo()
+
+	// Get the selected file
+	selectedFile := t.Files()[selectedIndex]
+
+	// Split the path and encode each component separately
+	pathComponents := strings.Split(selectedFile.Path(), "/")
+	encodedComponents := make([]string, len(pathComponents))
+	for i, component := range pathComponents {
+		encodedComponents[i] = url.PathEscape(component)
+	}
+
+	// Construct the webtorrent URL with properly encoded path components
+	streamURL := fmt.Sprintf("http://localhost:8000/webtorrent/%x/%s",
+		t.InfoHash(),
+		strings.Join(encodedComponents, "/"))
+
+	return streamURL, nil
+}
+
+// Add this helper function to check if a port is in use
+func isPortInUse(port int) bool {
+	addr := fmt.Sprintf(":%d", port)
+	listener, err := net.Listen("tcp", addr)
+	if err != nil {
+		return true
+	}
+	listener.Close()
+	return false
+}
+
+func StreamTorrentWebtorrent(magnetURI string, selectedIndex int) (string, error) {
+	// Start webtorrent server
+	err := StartWebtorrentServer(magnetURI, selectedIndex)
+	if err != nil {
+		return "", err
+	}
+
+	// Get the stream URL
+	streamURL, err := GetWebtorrentStreamURL(magnetURI, selectedIndex)
+	if err != nil {
+		return "", err
+	}
+
+	Debug("Stream URL: %s", streamURL)
 
 	// Create socket path with random component
 	socketPath := filepath.Join("/tmp", fmt.Sprintf("buttercup-%x.sock", time.Now().UnixNano()))
 
-	// Start peerflix in background with the provided index
-	peerflixCmd := exec.Command(peerflixPath,
-		magnetURI,
-		fmt.Sprintf("--index=%d", selectedIndex))
-
-	// Redirect stdout and stderr to /dev/null
-	devNull, err := os.OpenFile(os.DevNull, os.O_WRONLY, 0)
-	if err != nil {
-		return "", fmt.Errorf("failed to open /dev/null: %w", err)
-	}
-	defer devNull.Close()
-	
-	peerflixCmd.Stdout = devNull
-	peerflixCmd.Stderr = devNull
-
-	if err := peerflixCmd.Start(); err != nil {
-		return "", fmt.Errorf("failed to start peerflix: %w", err)
-	}
-	currentPeerflixProcess = peerflixCmd.Process
-
-	// Wait for peerflix server to be ready
-	ready := false
-	for i := 0; i < 30; i++ { // Try for 30 seconds
-		resp, err := http.Get(fmt.Sprintf("http://localhost:8888/%d", selectedIndex))
-		if err == nil {
-			resp.Body.Close()
-			ready = true
-			break
-		}
-		time.Sleep(1 * time.Second)
-	}
-
-	if !ready {
-		peerflixCmd.Process.Kill()
-		return "", fmt.Errorf("timeout waiting for peerflix to start")
-	}
-
-	// Start MPV with socket
+	// Start MPV once server is ready
 	mpvCmd := exec.Command("mpv",
 		"--force-seekable=yes",
 		"--input-ipc-server="+socketPath,
@@ -217,31 +294,20 @@ func StreamTorrentPeerflix(magnetURI string, selectedIndex int) (string, error) 
 		"--cache-secs=10",
 		"--demuxer-max-bytes=50M",
 		"--demuxer-readahead-secs=5",
-		fmt.Sprintf("http://localhost:8888/%d", selectedIndex))
+		"--really-quiet",
+		streamURL,
+	)
 
-	// Redirect MPV output to /dev/null as well
-	mpvCmd.Stdout = devNull
-	mpvCmd.Stderr = devNull
+	// Redirect output to /dev/null
+	mpvCmd.Stdout = nil
+	mpvCmd.Stderr = nil
 
-	if err := mpvCmd.Start(); err != nil {
-		peerflixCmd.Process.Kill()
+	err = mpvCmd.Start()
+	if err != nil {
 		return "", fmt.Errorf("failed to start mpv: %w", err)
 	}
 
-	// Wait for socket to be created
-	for i := 0; i < 10; i++ {
-		if _, err := os.Stat(socketPath); err == nil {
-			break
-		}
-		time.Sleep(100 * time.Millisecond)
-	}
-
-	// Clean up when MPV exits
-	go func() {
-		mpvCmd.Wait()
-		peerflixCmd.Process.Kill()
-	}()
-
+	Debug("Started mpv successfully")
 	return socketPath, nil
 }
 
@@ -257,7 +323,7 @@ func StreamTorrentSequentially(magnetURI string) error {
 	cfg := torrent.NewDefaultClientConfig()
 	cfg.DataDir = tmpDir
 	cfg.DefaultStorage = storage.NewFile(tmpDir)
-	
+
 	// Create torrent client
 	client, err := torrent.NewClient(cfg)
 	if err != nil {
@@ -277,8 +343,8 @@ func StreamTorrentSequentially(magnetURI string) error {
 	// Create options map for selection menu
 	options := make(map[string]string)
 	for i, file := range t.Files() {
-		options[fmt.Sprintf("%d", i)] = fmt.Sprintf("%s (%s)", 
-			file.Path(), 
+		options[fmt.Sprintf("%d", i)] = fmt.Sprintf("%s (%s)",
+			file.Path(),
 			humanize.Bytes(uint64(file.Length())))
 	}
 
@@ -322,13 +388,13 @@ func StreamTorrentSequentially(magnetURI string) error {
 	// Start MPV with socket
 	cmd := exec.Command(mpvPath,
 		"--force-seekable=yes",
-		"--input-ipc-server=" + socketPath,
-		"--cache=yes",              // Enable cache
-		"--cache-secs=10",          // Cache 10 seconds
-		"--demuxer-max-bytes=50M",  // Allow larger forward cache
+		"--input-ipc-server="+socketPath,
+		"--cache=yes",                // Enable cache
+		"--cache-secs=10",            // Cache 10 seconds
+		"--demuxer-max-bytes=50M",    // Allow larger forward cache
 		"--demuxer-readahead-secs=5", // Read 5 seconds ahead
 		pipePath)
-	
+
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 
@@ -350,10 +416,10 @@ func StreamTorrentSequentially(magnetURI string) error {
 	go func() {
 		defer close(done)
 		var lastPos float64 = -1
-		
+
 		// Wait for socket to be created
 		time.Sleep(time.Second)
-		
+
 		for {
 			select {
 			case <-done:
@@ -367,19 +433,19 @@ func StreamTorrentSequentially(magnetURI string) error {
 
 				if pos != lastPos {
 					fmt.Printf("\nPlayback position changed to: %.2f seconds\n", pos)
-					fmt.Printf("File length: %d bytes, Video length: %d seconds\n", 
-						selectedFile.Length(), 
+					fmt.Printf("File length: %d bytes, Video length: %d seconds\n",
+						selectedFile.Length(),
 						t.Info().Length)
-					
+
 					// Convert seconds to bytes (approximate)
 					bytesPerSecond := float64(selectedFile.Length()) / float64(t.Info().Length)
 					bytePos := int64(pos * bytesPerSecond)
 					fmt.Printf("Estimated byte position: %d\n", bytePos)
-					
+
 					streamManager.prioritizeFromPosition(bytePos)
 					lastPos = pos
 				}
-				
+
 				time.Sleep(100 * time.Millisecond)
 			}
 		}
@@ -422,9 +488,9 @@ func StreamTorrentSequentially(magnetURI string) error {
 
 func FindAndSortEpisodes(files []string) []string {
 	type Episode struct {
-		Path     string
-		Season   int
-		Episode  int
+		Path    string
+		Season  int
+		Episode int
 	}
 
 	var episodes []Episode
@@ -447,9 +513,9 @@ func FindAndSortEpisodes(files []string) []string {
 				episode, _ = strconv.Atoi(matches[4])
 			}
 			episodes = append(episodes, Episode{
-				Path:     file,
-				Season:   season,
-				Episode:  episode,
+				Path:    file,
+				Season:  season,
+				Episode: episode,
 			})
 		}
 	}
@@ -471,15 +537,22 @@ func FindAndSortEpisodes(files []string) []string {
 	return sortedFiles
 }
 
-func CleanupPeerflix() {
-	// Kill the process if we have it
-	if currentPeerflixProcess != nil {
-		currentPeerflixProcess.Kill()
-		currentPeerflixProcess = nil
+// Update the cleanup function to be more thorough
+func CleanupWebtorrent() {
+	// Kill any existing webtorrent processes
+	exec.Command("pkill", "-f", "webtorrent").Run()
+	
+	// Also kill any process using our ports
+	exec.Command("fuser", "-k", "8000/tcp").Run()
+	exec.Command("fuser", "-k", "42069/tcp").Run()
+	
+	// If we have a stored process, kill it directly
+	if currentWebtorrentProcess != nil {
+		currentWebtorrentProcess.Kill()
+		currentWebtorrentProcess = nil
 	}
-	fmt.Println("Killing peerflix process")
 
-	// Use pkill as a backup to ensure peerflix is killed
-	pkillCmd := exec.Command("pkill", "peerflix")
-	pkillCmd.Run() // Ignore errors as peerflix might not be running
+	// Give it a moment to clean up
+	time.Sleep(500 * time.Millisecond)
 }
+
