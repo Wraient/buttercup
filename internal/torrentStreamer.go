@@ -121,6 +121,8 @@ func StartWebtorrentServer(magnetURI string, selectedIndex int) error {
 	// Get storage path from config
 	config := GetGlobalConfig()
 
+	config.StoragePath = os.ExpandEnv(config.StoragePath)
+
 	// Create storage directory if it doesn't exist
 	if err := os.MkdirAll(config.StoragePath, 0755); err != nil {
 		return fmt.Errorf("failed to create storage directory: %w", err)
