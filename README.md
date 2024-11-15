@@ -1,15 +1,34 @@
 
 # buttercup
 
-A cli application to stream torrents and track the playback
+A cli application to stream torrents and track the playback using [jackett](https://github.com/Jackett/Jackett) and [peerflix](https://github.com/mafintosh/peerflix)
 
 ## Join the discord server
 
 https://discord.gg/cNaNVEE3B6
 
+## Demo
+
+The demo speed has been increased, real speed would be slower depending on number of seeders and leechers
+
+Cli Mode:
+
+https://github.com/user-attachments/assets/59a17262-46b8-4cdd-bd79-3c362d72f2c6
+
+Rofi Mode:
+
+https://github.com/user-attachments/assets/c2c18047-b76a-4c98-a00d-fdab9e8fde5c
+
 
 ## Features
-
+- Search for torrents
+- Stream torrents
+- Track playback
+- Save MPV Speed
+- Download / Install Jackett
+- Config file
+- CLI Selection menu
+- Rofi Support
 
 ## Installing and Setup
 > **Note**: `buttercup` requires `mpv`, `rofi`, and `webtorrent-cli` for Rofi support and torrent streaming. These are included in the installation instructions below for each distribution.
@@ -96,8 +115,6 @@ sudo mv buttercup /usr/local/bin/
 buttercup
 ```
 </details>
-
----
 
 <details>
 <summary>Uninstallation</summary>
